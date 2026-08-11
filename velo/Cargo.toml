@@ -1,0 +1,54 @@
+[package]
+name = "velo"
+description = "An async Rust web framework with first-class, always-accurate OpenAPI 3.1 — FastAPI ergonomics without the runtime cost"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["http", "web", "framework", "openapi", "async"]
+categories = ["web-programming::http-server", "asynchronous"]
+
+[dependencies]
+velo-openapi = { workspace = true }
+velo-macros = { workspace = true, optional = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_path_to_error = "0.1"
+regex = { version = "1", optional = true }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+tokio = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+percent-encoding = { workspace = true }
+tracing = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+serde = { workspace = true }
+futures-util = { workspace = true }
+
+[features]
+default = ["macros", "regex"]
+# `#[derive(Schema)]` and the routing attribute macros.
+macros = ["dep:velo-macros"]
+# Runtime enforcement of `#[validate(pattern = "...")]`. Without it, a pattern
+# is documented in the schema but never checked, so it is on by default.
+regex = ["dep:regex"]
+# `tracing` spans and events for every request.
+tracing = ["dep:tracing"]
+uuid = ["dep:uuid", "velo-openapi/uuid"]
+chrono = ["dep:chrono", "velo-openapi/chrono"]
+full = ["macros", "regex", "tracing", "uuid", "chrono"]
+
+[package.metadata.docs.rs]
+all-features = true

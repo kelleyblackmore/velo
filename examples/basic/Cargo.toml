@@ -1,0 +1,13 @@
+[package]
+name = "velo-example-basic"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+velo = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+futures-util = { workspace = true }
+uuid = { workspace = true }
