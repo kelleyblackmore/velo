@@ -42,4 +42,7 @@ proc-macro2 = "1"
 [profile.release]
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# Deliberately NOT `panic = "abort"`. The `CatchPanic` layer turns a panicking
+# handler into a 500 and keeps the process serving, and it does that by
+# catching an unwind. Aborting would make that guarantee false in exactly the
+# builds that matter.

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Warnings are failures here so they cannot accumulate unnoticed. Registry
+  # dependencies are built with --cap-lints allow, so this only binds our code.
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Development happens on Windows and deployment tends to be Linux, so
+        # neither is assumed to stand in for the other.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Test (all features)
+        run: cargo test --workspace --all-features
+
+      - name: Test (default features)
+        run: cargo test --workspace
+
+      - name: Test (no default features)
+        # Proves the library still builds and passes without the proc macros or
+        # the regex-backed pattern rule. Restricted to `--lib` because the
+        # integration tests use the macros, so they cannot build with the
+        # `macros` feature off.
+        run: cargo test -p velo --no-default-features --lib
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-features --all-targets
