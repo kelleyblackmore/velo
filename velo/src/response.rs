@@ -386,41 +386,77 @@ impl<T> OperationOutput for Html<T> {
     }
 }
 
-/// A `3xx` redirect.
+/// A `3xx` redirect, with its status in the type.
+///
+/// The status is a const parameter rather than a runtime field so the
+/// generated document states the code that is actually sent. A single
+/// `Redirect` type carrying a runtime status could only ever be documented as
+/// a guess, and a document that guesses is the thing this crate exists to
+/// avoid.
+///
+/// Use the aliases — [`SeeOther`], [`Temporary`], [`Permanent`] — in return
+/// types; they read better than the raw number.
 #[derive(Clone, Debug)]
-pub struct Redirect {
-    status: StatusCode,
+pub struct Redirect<const STATUS: u16 = 303> {
     location: String,
 }
 
-impl Redirect {
-    /// `303 See Other` — the right answer after a successful POST.
+/// `303 See Other` — the right answer after a successful `POST`.
+pub type SeeOther = Redirect<303>;
+/// `307 Temporary Redirect`, which preserves the method and body.
+pub type Temporary = Redirect<307>;
+/// `308 Permanent Redirect`, which preserves the method and body.
+pub type Permanent = Redirect<308>;
+
+impl Redirect<303> {
+    /// `303 See Other`. Turns a POST into a GET, which is what you want after
+    /// a form submission.
     pub fn see_other(location: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::SEE_OTHER,
-            location: location.into(),
-        }
-    }
-    /// `307 Temporary Redirect`, which preserves the method and body.
-    pub fn temporary(location: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::TEMPORARY_REDIRECT,
-            location: location.into(),
-        }
-    }
-    /// `308 Permanent Redirect`, which preserves the method and body.
-    pub fn permanent(location: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::PERMANENT_REDIRECT,
+        Redirect {
             location: location.into(),
         }
     }
 }
 
-impl IntoResponse for Redirect {
+impl Redirect<307> {
+    /// `307 Temporary Redirect`. The method and body survive, and nothing is
+    /// cached.
+    pub fn temporary(location: impl Into<String>) -> Self {
+        Redirect {
+            location: location.into(),
+        }
+    }
+}
+
+impl Redirect<308> {
+    /// `308 Permanent Redirect`.
+    ///
+    /// Caches aggressively and effectively forever. Reach for
+    /// [`Temporary`](Redirect::temporary) unless the move really is permanent.
+    pub fn permanent(location: impl Into<String>) -> Self {
+        Redirect {
+            location: location.into(),
+        }
+    }
+}
+
+impl<const STATUS: u16> Redirect<STATUS> {
+    /// The destination.
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+}
+
+impl<const STATUS: u16> IntoResponse for Redirect<STATUS> {
     fn into_response(self) -> Response {
+        let Ok(status) = StatusCode::from_u16(STATUS) else {
+            return ApiError::internal(format!("`{STATUS}` is not a valid status code"))
+                .into_response();
+        };
+
         let mut response = Response::new(ResBody::Empty);
-        *response.status_mut() = self.status;
+        *response.status_mut() = status;
+
         match HeaderValue::from_str(&self.location) {
             Ok(value) => {
                 response.headers_mut().insert(header::LOCATION, value);
@@ -435,9 +471,14 @@ impl IntoResponse for Redirect {
     }
 }
 
-impl OperationOutput for Redirect {
+impl<const STATUS: u16> OperationOutput for Redirect<STATUS> {
     fn describe(ctx: &mut OperationContext<'_>) {
-        let mut response = velo_openapi::Response::new("Redirect");
+        let mut response = velo_openapi::Response::new(match STATUS {
+            303 => "See other",
+            307 => "Temporary redirect; the method and body are preserved",
+            308 => "Permanent redirect; the method and body are preserved",
+            _ => "Redirect",
+        });
         let mut headers = velo_openapi::Map::new();
         headers.insert(
             "Location".into(),
@@ -448,10 +489,10 @@ impl OperationOutput for Redirect {
             },
         );
         response.headers = headers;
-        ctx.add_response(303, response);
+        ctx.add_response(STATUS, response);
     }
     fn status() -> Option<u16> {
-        Some(303)
+        Some(STATUS)
     }
 }
 
@@ -541,9 +582,31 @@ mod tests {
     }
 
     #[test]
-    fn redirect_documents_its_location_header() {
-        let operation = describe::<Redirect>();
-        assert!(operation.responses["303"].headers["Location"].required);
+    fn a_redirect_documents_the_status_it_actually_sends() {
+        // The bug this guards against: documenting 303 while sending 307.
+        let temporary = describe::<Temporary>();
+        assert!(temporary.responses.contains_key("307"));
+        assert!(!temporary.responses.contains_key("303"));
+        assert!(temporary.responses["307"].headers["Location"].required);
+
+        assert!(describe::<SeeOther>().responses.contains_key("303"));
+        assert!(describe::<Permanent>().responses.contains_key("308"));
+    }
+
+    #[test]
+    fn each_redirect_constructor_sends_its_own_status() {
+        assert_eq!(
+            Redirect::see_other("/x").into_response().status(),
+            StatusCode::SEE_OTHER
+        );
+        assert_eq!(
+            Redirect::temporary("/x").into_response().status(),
+            StatusCode::TEMPORARY_REDIRECT
+        );
+        assert_eq!(
+            Redirect::permanent("/x").into_response().status(),
+            StatusCode::PERMANENT_REDIRECT
+        );
     }
 
     #[test]

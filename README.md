@@ -305,6 +305,18 @@ App::new()
 neither, while `App::openapi()` still returns the document programmatically —
 useful for generating clients in CI.
 
+## Redirects carry their status in the type
+
+```rust
+async fn old_path() -> Temporary { Redirect::temporary("/new/path") }
+```
+
+`Redirect<307>` (aliased `Temporary`) documents a 307, `SeeOther` a 303, and
+`Permanent` a 308. The status is a const parameter rather than a runtime
+field, because a single type carrying a runtime status could only ever be
+*guessed at* in the document — and a document that guesses is the thing this
+crate exists to avoid.
+
 ## Feature flags
 
 | Feature | Default | Effect |

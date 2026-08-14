@@ -85,7 +85,8 @@ pub use extract::{
 pub use operation::{OperationContext, OperationInput, OperationOutput};
 pub use request::Request;
 pub use response::{
-    Accepted, Created, Html, IntoResponse, NoContent, Redirect, Response, WithHeaders, WithStatus,
+    Accepted, Created, Html, IntoResponse, NoContent, Permanent, Redirect, Response, SeeOther,
+    Temporary, WithHeaders, WithStatus,
 };
 pub use route::{IntoRoute, RouteDef};
 pub use sse::{Event, Sse};
@@ -116,7 +117,8 @@ pub mod prelude {
     };
     pub use crate::request::Request;
     pub use crate::response::{
-        Accepted, Created, Html, IntoResponse, NoContent, Redirect, Response, WithStatus,
+        Accepted, Created, Html, IntoResponse, NoContent, Permanent, Redirect, Response, SeeOther,
+        Temporary, WithStatus,
     };
     pub use crate::sse::{Event, Sse};
     pub use crate::testing::{TestClient, TestRequest};
