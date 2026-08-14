@@ -172,6 +172,36 @@ Available rules: `min_length`, `max_length`, `min_items`, `max_items`,
 `pattern` requires the `regex` feature, which is on by default; without it a
 pattern would be documented but never enforced.
 
+## File uploads
+
+`Multipart` parses a `multipart/form-data` body and documents the endpoint as
+such.
+
+```rust
+#[post("/avatars", tags = ["media"])]
+async fn upload(form: Multipart) -> Result<Created<Json<Avatar>>, ApiError> {
+    let image = form.require_file("image")?;      // 422 naming `image` if absent
+    let caption = form.text("caption").unwrap_or_default();
+
+    Ok(Created::at("/avatars/1", Json(store(image, caption).await?)))
+}
+```
+
+A `Part` carries its name, filename, content type, and bytes. `form.files()`
+walks the file parts, `form.all("tag")` handles a repeated name, and
+`form.deserialize::<T>()` runs the non-file parts through the same deserialiser
+a query string uses, so repeated fields become sequences.
+
+The body is already buffered when parsing starts, so this is a scanner rather
+than a streaming state machine. Two consequences worth knowing: an upload is
+bounded by `body_limit` like any other body, and part *count* has its own cap
+(`MAX_PARTS`), because a few megabytes of empty parts is otherwise millions of
+allocations.
+
+What it does not do: `Multipart` is untyped, so the generated schema says "an
+object of strings and binaries" rather than naming your fields. A precisely
+documented upload needs a newtype with its own `OperationInput`.
+
 ## Responses
 
 A handler's return type picks the status, the headers, and the documented
@@ -363,7 +393,7 @@ the behaviour described here is covered by tests:
 cargo test --workspace --all-features
 ```
 
-190 tests: 126 unit, 28 on derive output, 14 over a real TCP socket, 15 in
+214 tests: 147 unit, 28 on derive output, 17 over a real TCP socket, 15 in
 `velo-openapi`, 6 in the example service, and a compiled doc test.
 
 > **CI does not run on this repository.** A workflow is committed at
@@ -374,9 +404,10 @@ cargo test --workspace --all-features
 Known limits, stated plainly:
 
 - **Request bodies are buffered**, subject to `body_limit` (2 MiB by default).
-  There is no streaming-request extractor yet, so large uploads are out of
-  scope for now.
-- **No `multipart/form-data`.** File uploads need it; it is the largest gap.
+  There is no streaming-request extractor, so an upload larger than the limit
+  cannot be handled at all — raise the limit or reach for something else.
+- **Multipart schemas are untyped.** Uploads work, but the document describes
+  the body generically rather than naming each field.
 - **No WebSocket support.** SSE covers server-to-client streaming only.
 - **`Path<T>` deserialises from strings**, so a path parameter cannot be a
   nested structure. That matches what a URL can express.

@@ -54,12 +54,32 @@ async fn files(Path(path): Path<String>) -> String {
     path
 }
 
+#[derive(Debug, Schema, serde::Serialize)]
+struct Upload {
+    caption: String,
+    file_name: String,
+    bytes: usize,
+    /// Proves the payload survived the wire byte for byte.
+    checksum: u32,
+}
+
+#[post("/upload")]
+async fn upload(form: Multipart) -> Result<Json<Upload>, ApiError> {
+    let file = form.require_file("file")?;
+    Ok(Json(Upload {
+        caption: form.require_text("caption")?.to_owned(),
+        file_name: file.file_name().unwrap_or_default().to_owned(),
+        bytes: file.len(),
+        checksum: file.bytes().iter().map(|b| *b as u32).sum(),
+    }))
+}
+
 fn app() -> App {
     App::new()
         .title("Wire tests")
         .version("0.1.0")
         .body_limit(1024)
-        .mount(routes![hello, echo, boom, stream, files])
+        .mount(routes![hello, echo, boom, stream, files, upload])
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +142,34 @@ impl Server {
 
     async fn get(&self, path: &str) -> String {
         self.request("GET", path, "", "").await
+    }
+
+    /// Sends a request whose body is arbitrary bytes rather than text.
+    async fn request_bytes(
+        &self,
+        method: &str,
+        path: &str,
+        content_type: &str,
+        body: &[u8],
+    ) -> String {
+        let head = format!(
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
+             Content-Type: {content_type}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut request = head.into_bytes();
+        request.extend_from_slice(body);
+
+        let mut stream = TcpStream::connect(self.addr).await.expect("connect");
+        stream.write_all(&request).await.expect("write");
+        stream.flush().await.expect("flush");
+
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+            .await
+            .expect("response should arrive")
+            .expect("read");
+        String::from_utf8_lossy(&response).into_owned()
     }
 
     async fn stop(mut self) {
@@ -323,6 +371,106 @@ async fn a_bad_body_is_a_422_naming_the_field() {
     server.stop().await;
 }
 
+/// Assembles a multipart body. Written by hand so the bytes on the wire are
+/// exactly what a browser would send, rather than whatever a helper decides.
+fn multipart_body(boundary: &str, caption: &str, file: Option<(&str, &[u8])>) -> Vec<u8> {
+    let mut body = Vec::new();
+
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n"
+        )
+        .as_bytes(),
+    );
+
+    if let Some((name, bytes)) = file {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+                 filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+    }
+
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+#[tokio::test]
+async fn a_multipart_upload_arrives_intact_over_the_wire() {
+    let server = Server::start(app()).await;
+
+    // Every byte value, so anything that mishandles CR, LF, or the `-` that
+    // begins a boundary shows up as a checksum mismatch rather than passing.
+    let payload: Vec<u8> = (0u8..=255).collect();
+    let expected: u32 = payload.iter().map(|b| *b as u32).sum();
+
+    let body = multipart_body("BOUNDARY", "hello", Some(("all-bytes.bin", &payload)));
+    let response = server
+        .request_bytes(
+            "POST",
+            "/upload",
+            "multipart/form-data; boundary=BOUNDARY",
+            &body,
+        )
+        .await;
+
+    assert!(
+        status_line(&response).starts_with("HTTP/1.1 200"),
+        "{response}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(body_of(&response)).unwrap();
+    assert_eq!(parsed["caption"], "hello");
+    assert_eq!(parsed["file_name"], "all-bytes.bin");
+    assert_eq!(parsed["bytes"], 256);
+    assert_eq!(parsed["checksum"], expected);
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_multipart_body_missing_a_required_part_is_a_422() {
+    let server = Server::start(app()).await;
+    let body = multipart_body("B", "only text", None);
+
+    let response = server
+        .request_bytes("POST", "/upload", "multipart/form-data; boundary=B", &body)
+        .await;
+
+    assert!(
+        status_line(&response).starts_with("HTTP/1.1 422"),
+        "{response}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(body_of(&response)).unwrap();
+    assert_eq!(parsed["errors"][0]["pointer"], "/file");
+    assert_eq!(parsed["errors"][0]["code"], "missing");
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_json_body_sent_to_a_multipart_handler_is_a_415() {
+    let server = Server::start(app()).await;
+    let response = server
+        .request(
+            "POST",
+            "/upload",
+            "Content-Type: application/json\r\n",
+            "{}",
+        )
+        .await;
+
+    assert!(
+        status_line(&response).starts_with("HTTP/1.1 415"),
+        "{response}"
+    );
+
+    server.stop().await;
+}
+
 #[tokio::test]
 async fn the_openapi_document_is_served_and_is_valid_json() {
     let server = Server::start(app()).await;
@@ -335,6 +483,11 @@ async fn the_openapi_document_is_served_and_is_valid_json() {
     assert!(document["paths"]["/hello"]["get"].is_object());
     // The catch-all is documented without the routing star.
     assert!(document["paths"]["/files/{path}"].is_object());
+    // The upload advertises its media type rather than looking like JSON.
+    assert!(
+        document["paths"]["/upload"]["post"]["requestBody"]["content"]["multipart/form-data"]
+            .is_object()
+    );
 
     server.stop().await;
 }

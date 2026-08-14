@@ -73,9 +73,21 @@ impl JsonSchema for FieldError {
 }
 
 /// An error that knows how to render itself as an HTTP response.
+///
+/// Everything but the status lives behind a box, which keeps `ApiError` two
+/// words wide. That matters more here than it looks: almost every function in
+/// this crate returns `Result<T, ApiError>`, and an error type carried inline
+/// would tax the success path of every one of them for the sake of a value
+/// that is usually never constructed.
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
+    inner: Box<Details>,
+}
+
+/// The cold half of an [`ApiError`].
+#[derive(Debug)]
+struct Details {
     type_uri: Option<String>,
     title: String,
     detail: Option<String>,
@@ -91,15 +103,17 @@ impl ApiError {
     /// canonical reason phrase.
     pub fn new(status: StatusCode) -> Self {
         Self {
-            title: status.canonical_reason().unwrap_or("Error").to_owned(),
             status,
-            type_uri: None,
-            detail: None,
-            instance: None,
-            errors: Vec::new(),
-            extensions: Map::new(),
-            headers: HeaderMap::new(),
-            source: None,
+            inner: Box::new(Details {
+                title: status.canonical_reason().unwrap_or("Error").to_owned(),
+                type_uri: None,
+                detail: None,
+                instance: None,
+                errors: Vec::new(),
+                extensions: Map::new(),
+                headers: HeaderMap::new(),
+                source: None,
+            }),
         }
     }
 
@@ -155,53 +169,53 @@ impl ApiError {
     pub fn with_status(mut self, status: StatusCode) -> Self {
         // Keep the title in sync unless it was customised away from the
         // previous status' reason phrase.
-        if Some(self.title.as_str()) == self.status.canonical_reason() {
-            self.title = status.canonical_reason().unwrap_or("Error").to_owned();
+        if Some(self.inner.title.as_str()) == self.status.canonical_reason() {
+            self.inner.title = status.canonical_reason().unwrap_or("Error").to_owned();
         }
         self.status = status;
         self
     }
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = title.into();
+        self.inner.title = title.into();
         self
     }
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
+        self.inner.detail = Some(detail.into());
         self
     }
     /// Sets the `type` URI that identifies this problem class.
     pub fn with_type(mut self, type_uri: impl Into<String>) -> Self {
-        self.type_uri = Some(type_uri.into());
+        self.inner.type_uri = Some(type_uri.into());
         self
     }
     /// Sets the `instance` URI identifying this specific occurrence.
     pub fn with_instance(mut self, instance: impl Into<String>) -> Self {
-        self.instance = Some(instance.into());
+        self.inner.instance = Some(instance.into());
         self
     }
     pub fn with_field_errors(mut self, errors: Vec<FieldError>) -> Self {
-        self.errors = errors;
+        self.inner.errors = errors;
         self
     }
     pub fn with_field_error(mut self, error: FieldError) -> Self {
-        self.errors.push(error);
+        self.inner.errors.push(error);
         self
     }
     /// Adds a top-level extension member to the problem document.
     pub fn with_extension(mut self, key: impl Into<String>, value: Value) -> Self {
-        self.extensions.insert(key.into(), value);
+        self.inner.extensions.insert(key.into(), value);
         self
     }
     /// Adds a header to the eventual response, e.g. `WWW-Authenticate`.
     pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
-        self.headers.insert(name, value);
+        self.inner.headers.insert(name, value);
         self
     }
     pub fn with_source(
         mut self,
         source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        self.source = Some(source.into());
+        self.inner.source = Some(source.into());
         self
     }
 
@@ -211,13 +225,13 @@ impl ApiError {
         self.status
     }
     pub fn title(&self) -> &str {
-        &self.title
+        &self.inner.title
     }
     pub fn detail(&self) -> Option<&str> {
-        self.detail.as_deref()
+        self.inner.detail.as_deref()
     }
     pub fn field_errors(&self) -> &[FieldError] {
-        &self.errors
+        &self.inner.errors
     }
 
     /// The problem document as JSON, without the HTTP envelope.
@@ -226,26 +240,27 @@ impl ApiError {
         map.insert(
             "type".into(),
             Value::String(
-                self.type_uri
+                self.inner
+                    .type_uri
                     .clone()
                     .unwrap_or_else(|| "about:blank".to_owned()),
             ),
         );
-        map.insert("title".into(), Value::String(self.title.clone()));
+        map.insert("title".into(), Value::String(self.inner.title.clone()));
         map.insert("status".into(), Value::from(self.status.as_u16()));
-        if let Some(detail) = &self.detail {
+        if let Some(detail) = &self.inner.detail {
             map.insert("detail".into(), Value::String(detail.clone()));
         }
-        if let Some(instance) = &self.instance {
+        if let Some(instance) = &self.inner.instance {
             map.insert("instance".into(), Value::String(instance.clone()));
         }
-        if !self.errors.is_empty() {
+        if !self.inner.errors.is_empty() {
             map.insert(
                 "errors".into(),
-                serde_json::to_value(&self.errors).unwrap_or(Value::Null),
+                serde_json::to_value(&self.inner.errors).unwrap_or(Value::Null),
             );
         }
-        for (k, v) in &self.extensions {
+        for (k, v) in &self.inner.extensions {
             map.insert(k.clone(), v.clone());
         }
         Value::Object(map)
@@ -254,8 +269,8 @@ impl ApiError {
 
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.status.as_u16(), self.title)?;
-        if let Some(detail) = &self.detail {
+        write!(f, "{} {}", self.status.as_u16(), self.inner.title)?;
+        if let Some(detail) = &self.inner.detail {
             write!(f, ": {detail}")?;
         }
         Ok(())
@@ -264,7 +279,7 @@ impl std::fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|e| &**e as _)
+        self.inner.source.as_ref().map(|e| &**e as _)
     }
 }
 
@@ -278,12 +293,12 @@ impl IntoResponse for ApiError {
         response
             .headers_mut()
             .insert(header::CONTENT_TYPE, HeaderValue::from_static(PROBLEM_JSON));
-        for (name, value) in self.headers.iter() {
+        for (name, value) in self.inner.headers.iter() {
             response.headers_mut().insert(name.clone(), value.clone());
         }
         // Stash the error so downstream middleware (logging, tracing) can
         // inspect the real cause rather than re-parsing the body.
-        if let Some(source) = self.source {
+        if let Some(source) = self.inner.source {
             response
                 .extensions_mut()
                 .insert(ErrorSource(std::sync::Arc::from(source)));

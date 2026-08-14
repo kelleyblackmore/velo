@@ -9,12 +9,14 @@
 mod de;
 mod depends;
 mod json;
+mod multipart;
 mod path;
 mod query;
 
 pub use de::{DeError, Pairs};
 pub use depends::{Dependency, Depends};
 pub use json::Json;
+pub use multipart::{boundary_of, Multipart, MultipartError, Part, MAX_PARTS};
 pub use path::Path;
 pub use query::Query;
 

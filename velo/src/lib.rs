@@ -80,7 +80,8 @@ pub use body::ResBody;
 pub use docs::{Docs, Renderer};
 pub use error::{ApiError, FieldError, ProblemDetails};
 pub use extract::{
-    Bearer, Cookies, Depends, Extension, Form, FromRequest, Json, Path, Query, State,
+    Bearer, Cookies, Depends, Extension, Form, FromRequest, Json, Multipart, Part, Path, Query,
+    State,
 };
 pub use operation::{OperationContext, OperationInput, OperationOutput};
 pub use request::Request;
@@ -112,8 +113,8 @@ pub mod prelude {
     pub use crate::app::{App, Router};
     pub use crate::error::{ApiError, FieldError};
     pub use crate::extract::{
-        Bearer, Cookies, Dependency, Depends, Extension, Form, FromRequest, Json, Path, Query,
-        State,
+        Bearer, Cookies, Dependency, Depends, Extension, Form, FromRequest, Json, Multipart, Part,
+        Path, Query, State,
     };
     pub use crate::request::Request;
     pub use crate::response::{
