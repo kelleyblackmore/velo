@@ -50,7 +50,7 @@ That program serves the endpoint, `/openapi.json`, and a browsable UI at
 
 ---
 
-## Why not just FastAPI
+## Compared with FastAPI
 
 | | FastAPI | velo |
 |---|---|---|
@@ -63,8 +63,12 @@ That program serves the endpoint, `/openapi.json`, and a browsable UI at
 | Runtime | interpreter, per-field reflection | monomorphised handlers, one deserialise |
 
 The parts of FastAPI worth keeping are kept: extractors read like function
-arguments, doc comments become prose, and the document is always in step with
-the server because there is only one place the information lives.
+arguments, doc comments become prose, and the document stays in step with the
+server because there is only one place the information lives.
+
+FastAPI remains the faster way to get an idea in front of someone. This is
+aimed at the point where you want the same ergonomics with the failure modes
+moved from runtime to compile time.
 
 ## Layout
 
@@ -167,6 +171,34 @@ Available rules: `min_length`, `max_length`, `min_items`, `max_items`,
 
 `pattern` requires the `regex` feature, which is on by default; without it a
 pattern would be documented but never enforced.
+
+## Responses
+
+A handler's return type picks the status, the headers, and the documented
+schema together.
+
+```rust
+async fn get_user(...)    -> Result<Json<User>, ApiError>   // 200, or problem+json
+async fn create_user(...) -> Created<Json<User>>            // 201 + Location
+async fn delete_user(...) -> NoContent                      // 204
+async fn old_path()       -> Temporary                      // 307 + Location
+```
+
+`Redirect` carries its status as a const parameter — `SeeOther` is
+`Redirect<303>`, `Temporary` is `Redirect<307>`, `Permanent` is
+`Redirect<308>`. A single type holding a runtime status could only ever be
+*guessed at* in the document, and a document that guesses is the thing this
+crate exists to avoid. Changing the constructor changes the signature, which
+changes the published contract.
+
+`(StatusCode, T)`, `WithStatus`, and `WithHeaders` wrap any of these when you
+need to override something. `Result<T, E>` documents both arms, which is why
+`ApiError` appears as a `default` problem-details response rather than as a
+guess at every status a handler might return.
+
+Custom response types implement `IntoResponse` **and** `OperationOutput`. That
+pairing is deliberate: there is no way to add a response shape the document
+does not know about.
 
 ## Dependencies
 
@@ -310,18 +342,6 @@ App::new()
 `Docs::json_only()` serves the document with no UI; `without_docs()` serves
 neither, while `App::openapi()` still returns the document programmatically —
 useful for generating clients in CI.
-
-## Redirects carry their status in the type
-
-```rust
-async fn old_path() -> Temporary { Redirect::temporary("/new/path") }
-```
-
-`Redirect<307>` (aliased `Temporary`) documents a 307, `SeeOther` a 303, and
-`Permanent` a 308. The status is a const parameter rather than a runtime
-field, because a single type carrying a runtime status could only ever be
-*guessed at* in the document — and a document that guesses is the thing this
-crate exists to avoid.
 
 ## Feature flags
 
