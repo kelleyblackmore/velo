@@ -355,25 +355,30 @@ impl JsonSchema for ProblemDetails {
             "type".into(),
             string
                 .clone()
-                .with_description("URI identifying the problem type."),
+                .with_description("URI identifying the problem type.")
+                .with_example(serde_json::json!("about:blank")),
         );
         schema.properties.insert(
             "title".into(),
             string
                 .clone()
-                .with_description("Short, human-readable summary."),
+                .with_description("Short, human-readable summary.")
+                .with_example(serde_json::json!("Not Found")),
         );
-        schema.properties.insert(
-            "status".into(),
-            generator
-                .subschema_for::<u16>()
-                .with_description("The HTTP status code."),
-        );
+        // Without an example, a `u16` renders as `65535` in every docs UI,
+        // which makes this crate's own error shape look broken.
+        let mut status = generator.subschema_for::<u16>();
+        status.description = Some("The HTTP status code.".into());
+        status.minimum = Some(100.0);
+        status.maximum = Some(599.0);
+        status.examples = vec![serde_json::json!(404)];
+        schema.properties.insert("status".into(), status);
         schema.properties.insert(
             "detail".into(),
             string
                 .clone()
-                .with_description("Explanation specific to this occurrence."),
+                .with_description("Explanation specific to this occurrence.")
+                .with_example(serde_json::json!("No user with id 7.")),
         );
         schema.properties.insert(
             "instance".into(),
@@ -394,6 +399,21 @@ impl JsonSchema for ProblemDetails {
 mod tests {
     use super::*;
     use http_body_util::BodyExt;
+
+    #[test]
+    fn the_problem_schema_carries_examples_that_read_as_real() {
+        // A `u16` with no example renders as 65535 in every docs UI.
+        let (_, definitions) = velo_openapi::schema_for::<ProblemDetails>();
+        let schema = &definitions["ProblemDetails"];
+
+        let status = &schema.properties["status"];
+        assert_eq!(status.examples, vec![serde_json::json!(404)]);
+        assert_eq!((status.minimum, status.maximum), (Some(100.0), Some(599.0)));
+        assert_eq!(
+            schema.properties["title"].examples,
+            vec![serde_json::json!("Not Found")]
+        );
+    }
 
     #[test]
     fn problem_document_follows_rfc_9457() {
