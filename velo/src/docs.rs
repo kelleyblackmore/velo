@@ -84,8 +84,20 @@ impl Docs {
 
     /// Serves a single renderer at its conventional path.
     pub fn only(renderer: Renderer) -> Self {
+        Self::only_at(renderer.default_path(), renderer)
+    }
+
+    /// Serves a single renderer at a path you choose.
+    ///
+    /// `/docs` is where people look regardless of which renderer is behind it,
+    /// so swapping renderers should not mean moving the URL:
+    ///
+    /// ```ignore
+    /// App::new().docs(Docs::only_at("/docs", Renderer::Redoc))
+    /// ```
+    pub fn only_at(path: impl Into<String>, renderer: Renderer) -> Self {
         Self {
-            uis: vec![(renderer.default_path().to_owned(), renderer)],
+            uis: vec![(path.into(), renderer)],
             ..Self::default()
         }
     }
@@ -293,6 +305,18 @@ mod tests {
     fn the_default_set_covers_json_and_two_uis() {
         let docs = Docs::default();
         assert_eq!(docs.paths(), vec!["/openapi.json", "/docs", "/redoc"]);
+    }
+
+    #[test]
+    fn a_single_renderer_can_be_placed_at_any_path() {
+        // `/docs` is where people look whichever renderer is behind it, so
+        // choosing a renderer must not force the URL to move.
+        let docs = Docs::only_at("/docs", Renderer::Redoc);
+        assert_eq!(docs.paths(), vec!["/openapi.json", "/docs"]);
+
+        // The conventional placement still works.
+        let docs = Docs::only(Renderer::Redoc);
+        assert_eq!(docs.paths(), vec!["/openapi.json", "/redoc"]);
     }
 
     #[test]
