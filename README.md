@@ -75,6 +75,12 @@ the server because there is only one place the information lives.
 | [`velo-macros`](velo-macros) | `#[derive(Schema)]`, the method attributes, `routes!` |
 | [`examples/basic`](examples/basic) | a complete service — CRUD, auth, SSE, pagination |
 
+There is also a separate consumer, [**snip**](https://github.com/kelleyblackmore/snip):
+a URL shortener built on this crate the way you would actually build one.
+Writing it found three bugs in here that reading the code had not, including a
+`Redirect` that documented `303` while sending `307` — this crate's central
+promise, broken in its own response type.
+
 ## Getting started
 
 ```bash
@@ -337,8 +343,13 @@ the behaviour described here is covered by tests:
 cargo test --workspace --all-features
 ```
 
-188 tests: 125 unit, 28 on derive output, 14 over a real TCP socket, 14 in
-`velo-openapi`, plus the example service's own suite.
+190 tests: 126 unit, 28 on derive output, 14 over a real TCP socket, 15 in
+`velo-openapi`, 6 in the example service, and a compiled doc test.
+
+> **CI does not run on this repository.** A workflow is committed at
+> [`.github/workflows/ci.yml`](.github/workflows/ci.yml), but GitHub Actions is
+> switched off here, so pushes and pull requests are **not** automatically
+> checked. Run the command above before trusting a change.
 
 Known limits, stated plainly:
 
