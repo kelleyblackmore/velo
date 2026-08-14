@@ -110,6 +110,29 @@ transparent!(
     std::sync::Mutex<T>
 );
 
+// A borrowed value describes itself exactly as the owned one does. Without
+// this, a `&'static str` field — a constant in a response type, say — fails to
+// derive for no reason the author can see.
+impl<T: JsonSchema + ?Sized> JsonSchema for &T {
+    fn schema_name() -> Option<String> {
+        T::schema_name()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        T::json_schema(generator)
+    }
+    const OPTIONAL: bool = T::OPTIONAL;
+}
+
+impl<T: JsonSchema + ?Sized> JsonSchema for &mut T {
+    fn schema_name() -> Option<String> {
+        T::schema_name()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        T::json_schema(generator)
+    }
+    const OPTIONAL: bool = T::OPTIONAL;
+}
+
 impl<'a, T> JsonSchema for Cow<'a, T>
 where
     T: JsonSchema + ToOwned + ?Sized,
@@ -283,6 +306,13 @@ mod chrono_impls {
 mod tests {
     use super::*;
     use crate::gen::schema_for;
+
+    #[test]
+    fn a_reference_describes_itself_as_its_target_does() {
+        let (borrowed, _) = schema_for::<&str>();
+        let (owned, _) = schema_for::<String>();
+        assert_eq!(borrowed, owned);
+    }
 
     #[test]
     fn option_is_nullable_and_not_required() {

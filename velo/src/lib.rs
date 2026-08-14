@@ -91,6 +91,13 @@ pub use route::{IntoRoute, RouteDef};
 pub use sse::{Event, Sse};
 pub use validate::{Validate, ValidationErrors};
 
+/// The `http` crate, re-exported.
+///
+/// Handlers routinely need `HeaderMap`, `HeaderName`, `HeaderValue`, and the
+/// `header::*` constants. Re-exporting them means a consumer cannot end up
+/// with a second, incompatible version of the very types this crate hands it.
+pub use http;
+
 /// The OpenAPI document model, re-exported so downstream crates need not
 /// depend on it separately.
 pub use velo_openapi as openapi;
@@ -115,7 +122,7 @@ pub mod prelude {
     pub use crate::testing::{TestClient, TestRequest};
     pub use crate::validate::{Validate, ValidationErrors};
     pub use crate::{Docs, Renderer};
-    pub use http::StatusCode;
+    pub use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
     pub use velo_openapi::JsonSchema;
 
     #[cfg(feature = "macros")]

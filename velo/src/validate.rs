@@ -142,6 +142,12 @@ mod chrono_validate {
     impl Validate for chrono::NaiveDateTime {}
 }
 
+impl<T: Validate + ?Sized> Validate for &T {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        (**self).validate()
+    }
+}
+
 impl<T: Validate + ?Sized> Validate for Box<T> {
     fn validate(&self) -> Result<(), ValidationErrors> {
         (**self).validate()
